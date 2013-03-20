@@ -1,6 +1,4 @@
 // Author: Štěpán Heller (helleste)
-// TEST CHANGE
-// ANOTHER CHANGE
 
 package robot;
 
@@ -37,7 +35,7 @@ class PhotoClient {
 	private static final int PORT = 4000; // port number on baryk
 	private InetAddress address = null;
 	
-	private static final int SYN = 1; // SYN flag
+	private static final int SYN = 4; // SYN flag
 	private static final int FIN = 4; // FIN flag
 	private static final int RST = 2	; // RST flag
 	
@@ -64,70 +62,57 @@ class PhotoClient {
 	
 	public void run() {
 		
-		PhotoPacket ppacket = null;
+		// TODO Try to receive datagram from baryk and create PhotoPacket from it
+		PhotoPacket ppacket = new PhotoPacket(0, 0, 0, SYN, DOWNLOAD);
+		packPacket(ppacket);
+		ppacket.printPacket();
 		
 		try {
-			ppacket = init(ppacket);
+			// Send packet to baryk
+			this.socket.send(this.packet);
+			
+			// Receive packet from baryk
+			this.socket.receive(this.packet);
+			
+			// Create PhotoPacket from datagram
+			ppacket = new PhotoPacket(this.packet.getData());
+			
+			// Print header of received packet
+			ppacket.printPacket();
 			
 			// Receive second packet from baryk with real photo data
 			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 			this.socket.receive(this.packet);
 			ppacket = new PhotoPacket(this.packet.getData());
 			ppacket.printPacket();
-			// TODO Save photo data
+			FileOutputStream fos = new FileOutputStream("./fotka.png");
+			fos.write(ppacket.data);
+			fos.close();
 			
-			int index = 0;
-			int ack = 0;
+			// Send confirmation packet to baryk
+			ppacket = new PhotoPacket(ppacket.conNum, 0, ppacket.seqNum, 0, null);
+			packPacket(ppacket);
+			ppacket.printPacket();
+			this.socket.send(this.packet);
 			
-			while(!ppacket.fin) {
-				index = calcIndex(ppacket.seqNum);
-				setSign(index); // Set flag in the array from received seqNum
-				savePacket(index, ppacket); // Save PhotoPacket to the array
-				ack = findAck(); // Find ACK to send
-				
-				// Send confirmation packet to baryk
-				ppacket = new PhotoPacket(ppacket.conNum, 0, ack, 0, null);
-				packPacket(ppacket);
-				ppacket.printPacket();
-				this.socket.send(this.packet);
-				
-				// Receive new packet
-				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
-				this.socket.receive(this.packet);
-				ppacket = new PhotoPacket(this.packet.getData());
-				ppacket.printPacket();
-			}
+			// Receive third packet from baryk
+			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
+			this.socket.receive(this.packet);
+			ppacket = new PhotoPacket(this.packet.getData());
+			ppacket.printPacket();
 			
-			// We have ppacket with fin flag on
-			// TODO Send FIN packet to baryk
-			// TODO Save photo
-			System.out.println("RECEIVING DATA FINISHED!");
+			// TODO Boolean Arraylist of flags
+			// TODO while(!fin)
+			// TODO setSign(index)
+			// TODO savePacket(packet, index);
+			// TODO int ack = findAck();
+			// TODO new packet;
+			// TODO packet.ack = ack;
+			// TODO send(packet);
 		}
 		catch(IOException e) {
 			e.printStackTrace();
 		}
-	}
-	
-	// Establish communication with baryk
-	private PhotoPacket init(PhotoPacket ppacket) throws IOException {
-		
-		ppacket = new PhotoPacket(0, 0, 0, SYN, DOWNLOAD);
-		packPacket(ppacket);
-		ppacket.printPacket();
-		
-		// Send packet to baryk
-		this.socket.send(this.packet);
-		
-		// Receive packet from baryk
-		this.socket.receive(this.packet);
-					
-		// Create PhotoPacket from datagram
-		ppacket = new PhotoPacket(this.packet.getData());
-		
-		// Print header of received packet
-		ppacket.printPacket();
-		
-		return ppacket;
 	}
 	
 	// Fill my DatagramPacket with my custom PhotoPacket's data
@@ -173,39 +158,36 @@ class PhotoClient {
 	// Set flag in the array according to received index
 	private void setSign(int index) {
 		
-		if(index >= this.flags.size()) {
+		if(index > this.flags.size()) {
 			for (int i = this.flags.size(); i < index; i++) {
 				this.flags.add(i, false);
 			}
 		}
 		
-		this.flags.set(index, true);
+		this.flags.add(index, true);
 		return;
 	}
 	
 	// Add received packet to the array
 	private void savePacket(int index, PhotoPacket photoPacket) {
 		
-		if(index >= this.receivedPackets.size()) {
+		if(index > this.receivedPackets.size()) {
 			for (int i = this.receivedPackets.size(); i < index; i++) {
 				this.receivedPackets.add(i, null);
 			}
 		}
 		
-		this.receivedPackets.set(index, photoPacket);
+		this.receivedPackets.add(index, photoPacket);
 		return;
 	}
 	
 	// Find ACK to send
 	private int findAck() {
-		int ack = 255;
+		int ack = 0;
 		
 		for(Iterator<Boolean> it = this.flags.iterator(); it.hasNext(); ack += 255) {
 			Object element = it.next();
-			if(element.equals(false)) { // I find a hole in the array
-				ack -= 255;
-				break;
-			}
+			if(element.equals(false)) break;
 		}
 		
 		return ack;
