@@ -1,5 +1,6 @@
 // Author: Štěpán Heller (helleste)
 // TEST CHANGE
+// ANOTHER CHANGE
 
 package robot;
 
