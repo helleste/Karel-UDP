@@ -35,9 +35,9 @@ class PhotoClient {
 	private static final int PORT = 4000; // port number on baryk
 	private InetAddress address = null;
 	
-	private static final int SYN = 1; // SYN flag
-	private static final int FIN = 4; // FIN flag
-	private static final int RST = 2	; // RST flag
+	private static final int SYN = 4; // SYN flag
+	private static final int FIN = 2; // FIN flag
+	private static final int RST = 1	; // RST flag
 	
 	private static final byte[] DOWNLOAD = {0x01}; // Download a photo
 	
@@ -71,6 +71,7 @@ class PhotoClient {
 			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 			this.socket.receive(this.packet);
 			ppacket = new PhotoPacket(this.packet.getData());
+			System.out.print("\nRCVD: ");
 			ppacket.printPacket();
 			// TODO Save photo data
 			
@@ -84,8 +85,9 @@ class PhotoClient {
 				ack = findAck(); // Find ACK to send
 				
 				// Send confirmation packet to baryk
-				ppacket = new PhotoPacket(ppacket.conNum, 0, ack, 0, null);
+				ppacket = new PhotoPacket(ppacket.conNum, 0, ack, 0, new byte[0]);
 				packPacket(ppacket);
+				System.out.print("\nSEND: ");
 				ppacket.printPacket();
 				this.socket.send(this.packet);
 				
@@ -93,6 +95,7 @@ class PhotoClient {
 				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 				this.socket.receive(this.packet);
 				ppacket = new PhotoPacket(this.packet.getData());
+				System.out.print("\nRCVD: ");
 				ppacket.printPacket();
 			}
 			
@@ -111,6 +114,7 @@ class PhotoClient {
 		
 		ppacket = new PhotoPacket(0, 0, 0, SYN, DOWNLOAD);
 		packPacket(ppacket);
+		System.out.print("SEND: ");
 		ppacket.printPacket();
 		
 		// Send packet to baryk
@@ -123,6 +127,7 @@ class PhotoClient {
 		ppacket = new PhotoPacket(this.packet.getData());
 		
 		// Print header of received packet
+		System.out.print("\nRCVD: ");
 		ppacket.printPacket();
 		
 		return ppacket;
@@ -134,18 +139,18 @@ class PhotoClient {
 		byte myPacket[] = new byte[10];
 		
 		// Add connection number first
-		myPacket[0] = (byte) (ppacket.conNum >> 24);
-		myPacket[1] = (byte) (ppacket.conNum >> 16);
-		myPacket[2] = (byte) (ppacket.conNum >> 8);
-		myPacket[3] = (byte) (ppacket.conNum);
+		myPacket[0] = (byte) ((ppacket.conNum >> 24) % 256);
+		myPacket[1] = (byte) ((ppacket.conNum >> 16) % 256);
+		myPacket[2] = (byte) ((ppacket.conNum >> 8) % 256);
+		myPacket[3] = (byte) ((ppacket.conNum) % 256);
 		
 		// Then add the sequence number
-		myPacket[4] = (byte) (ppacket.seqNum >> 8);
-		myPacket[5] = (byte) (ppacket.seqNum);
+		myPacket[4] = (byte) ((ppacket.seqNum >> 8) % 256);
+		myPacket[5] = (byte) ((ppacket.seqNum) % 256);
 		
+		myPacket[7] = (byte) ((ppacket.ackNum) % 256);
 		// Then add the acknowledgment number
-		myPacket[6] = (byte) (ppacket.ackNum >> 8);
-		myPacket[7] = (byte) (ppacket.ackNum);
+		myPacket[6] = (byte) ((ppacket.ackNum >> 8) % 256);
 		
 		// The header ends with set of flags
 		myPacket[8] = (byte) (ppacket.signs);
@@ -157,8 +162,12 @@ class PhotoClient {
 			}
 		}
 		
+		// Decide the sending length of the packet
+		int lengthPacket = 9;
+		if(ppacket.syn) lengthPacket = 10;
+		
 		// Create the final DatagramPacket
-		this.packet = new DatagramPacket(myPacket, myPacket.length, this.address, PORT);
+		this.packet = new DatagramPacket(myPacket, lengthPacket, this.address, PORT);
 		
 	}
 	
@@ -172,7 +181,7 @@ class PhotoClient {
 	private void setSign(int index) {
 		
 		if(index >= this.flags.size()) {
-			for (int i = this.flags.size(); i < index; i++) {
+			for (int i = this.flags.size(); i <= index; i++) {
 				this.flags.add(i, false);
 			}
 		}
@@ -185,7 +194,7 @@ class PhotoClient {
 	private void savePacket(int index, PhotoPacket photoPacket) {
 		
 		if(index >= this.receivedPackets.size()) {
-			for (int i = this.receivedPackets.size(); i < index; i++) {
+			for (int i = this.receivedPackets.size(); i <= index; i++) {
 				this.receivedPackets.add(i, null);
 			}
 		}
@@ -196,14 +205,13 @@ class PhotoClient {
 	
 	// Find ACK to send
 	private int findAck() {
-		int ack = 255;
+		int ack = 0;
+		boolean c;
 		
-		for(Iterator<Boolean> it = this.flags.iterator(); it.hasNext(); ack += 255) {
-			Object element = it.next();
-			if(element.equals(false)) { // I find a hole in the array
-				ack -= 255;
-				break;
-			}
+		for(int i = 0; i < this.flags.size(); i++) {
+			c = this.flags.get(i);
+			if(c == false) break; // Found a hole in the array
+			ack += 255;
 		}
 		
 		return ack;
@@ -224,13 +232,14 @@ class PhotoPacket {
 	public byte[] data; // photo data
 	
 	// Create new PhotoPacket with all parameters
-	public PhotoPacket(int conNum, int seqNum, int ackNum, int signs, byte[] data) {
+	public PhotoPacket(int conNum, int seqNum, int ackNum, int signs, byte data[]) {
 		
 		this.conNum = conNum;
 		this.seqNum = seqNum;
 		this.ackNum = ackNum;
 		this.signs = signs;
 		this.data = data;
+		if(this.data == null) this.data = new byte[0];
 		parseSigns(signs);
 	}
 	
@@ -268,18 +277,18 @@ class PhotoPacket {
 			this.rst = false;
 			break;
 		case 1:
-			this.rst = false;
-			this.syn = true;
+			this.rst = true;
+			this.syn = false;
 			this.fin = false;
 			break;
 		case 2:
-			this.fin = false;
+			this.fin = true;
 			this.syn = false;
-			this.rst = true;
+			this.rst = false;
 			break;
 		case 4:
-			this.syn = false;
-			this.fin = true;
+			this.syn = true;
+			this.fin = false;
 			this.rst = false;
 			break;
 
@@ -293,19 +302,19 @@ class PhotoPacket {
 	public void printPacket() {
 		
 		StringBuilder log = new StringBuilder();
-		log.append("CONNECTION NUMBER: " + this.conNum);
-		log.append(" SEQUENCE NUMBER: " + this.seqNum);
-		log.append(" SIGNS: " + this.signs);
-		log.append (" ACK: " + this.ackNum);
+		log.append("conNum: " + this.conNum);
+		log.append(" seqNum: " + this.seqNum);
+		log.append(" signs: " + this.signs);
+		log.append (" ack: " + this.ackNum);
 		log.append(" SYN: " + this.syn);
 		log.append(" FIN: " + this.fin);
 		log.append(" RST: " + this.rst);
 		if(this.data != null) {
-			log.append(" DATA LENGHT: " + this.data.length);
+			log.append(" dataLength: " + this.data.length);
 			log.append(" DATA: " + bytesToHex(this.data));
 		}
 		
-		System.out.println(log.toString());
+		System.out.print(log.toString());
 	}
 	
 	// Create string from data's hexa
