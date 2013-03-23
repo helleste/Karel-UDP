@@ -46,6 +46,10 @@ class PhotoClient {
 	
 	private ArrayList<PhotoPacket> receivedPackets = new ArrayList<PhotoPacket>(); // Raw photo data
 	
+	int overflow = 0; // How many times seqNum overflowed
+	int ack = 0; // Expected seqNum
+	boolean of = false; // Overflow flag
+	
 	public PhotoClient(String host) {
 		try {
 			this.address = InetAddress.getByName(host);
@@ -76,16 +80,15 @@ class PhotoClient {
 			// TODO Save photo data
 			
 			int index = 0;
-			int ack = 0;
 			
 			while(!ppacket.fin) {
 				index = calcIndex(ppacket.seqNum);
 				setSign(index); // Set flag in the array from received seqNum
 				savePacket(index, ppacket); // Save PhotoPacket to the array
-				ack = findAck(); // Find ACK to send
+				this.ack = findAck(); // Find ACK to send
 				
 				// Send confirmation packet to baryk
-				ppacket = new PhotoPacket(ppacket.conNum, 0, ack, 0, new byte[0]);
+				ppacket = new PhotoPacket(ppacket.conNum, 0, this.ack, 0, new byte[0]);
 				packPacket(ppacket);
 				System.out.print("\nSEND: ");
 				ppacket.printPacket();
@@ -118,6 +121,7 @@ class PhotoClient {
 		ppacket.printPacket();
 		
 		// Send packet to baryk
+		// TODO Make sure that baryk received my SYN packet
 		this.socket.send(this.packet);
 		
 		// Receive packet from baryk
@@ -174,6 +178,34 @@ class PhotoClient {
 	// Calculate index from received seqNum
 	private int calcIndex(int seqNum) {
 		
+		if((char) this.ack < 2048) // ACK overflown or not yet
+			this.of = false;
+			
+		if(!this.of && (seqNum < ((int) (char) (this.ack) - 2048)) && ((char)(seqNum) < (char) (this.ack + 2048))) {
+			this.of = true;
+			this.overflow++;
+			System.out.println("\nOVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack) + " ack-w= " +  ((int) (char)(this.ack)-2048));
+		}
+		
+		if(this.of && seqNum > 2048) { // In overflow mode but seqNum is before overflow
+			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1; // Possibly + overflow
+			System.out.println("\n OF1. Calculated index: " + index/255);
+			return index/255;
+		}
+		
+		if(!this.of && this.overflow > 0) { // Ack overflown, no overflow mode
+			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow; // Possibly + overflow
+			System.out.println("\n OF2. Calculated index: " + index/255);
+			return index/255;
+		}
+		
+		if(this.of && this.overflow > 0 && ((char)(seqNum) < (char) (this.ack + 2048))) { // Overflow mode, ack is old, seqNum is overflow
+			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow; // Possibly + overflow
+			System.out.println("\n OF3. Calculated index: " + index/255);
+			return index/255;
+		}
+		
+		System.out.println("\nCalculated index: " + seqNum/255);
 		return seqNum/255; 
 	}
 	
@@ -210,7 +242,7 @@ class PhotoClient {
 		
 		for(int i = 0; i < this.flags.size(); i++) {
 			c = this.flags.get(i);
-			if(c == false) break; // Found a hole in the array
+			if(c == false) break; // Found a hole in the array TODO Write a position of the hole to log
 			ack += 255;
 		}
 		
