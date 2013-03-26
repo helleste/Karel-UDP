@@ -84,6 +84,8 @@ class PhotoClient {
 			while(!ppacket.fin) {
 				index = calcIndex(ppacket.seqNum);
 				setSign(index); // Set flag in the array from received seqNum
+				System.out.println(flags.toString());
+				System.out.println("FLAGS SIZE: " + flags.size());
 				savePacket(index, ppacket); // Save PhotoPacket to the array
 				this.ack = findAck(); // Find ACK to send
 				
@@ -334,10 +336,10 @@ class PhotoPacket {
 	public void printPacket() {
 		
 		StringBuilder log = new StringBuilder();
-		log.append("conNum: " + this.conNum);
+		log.append("conNum: " + Integer.toHexString(this.conNum));
 		log.append(" seqNum: " + this.seqNum);
 		log.append(" signs: " + this.signs);
-		log.append (" ack: " + this.ackNum);
+		log.append (" ack: " + (int) (char) this.ackNum);
 		log.append(" SYN: " + this.syn);
 		log.append(" FIN: " + this.fin);
 		log.append(" RST: " + this.rst);
