@@ -77,9 +77,8 @@ class PhotoClient {
 			// Receive second packet from baryk with real photo data
 			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 			this.socket.receive(this.packet);
-			System.out.println("\n" + this.packet.getLength());
 			ppacket = new PhotoPacket(this.packet.getData());
-			System.out.print("\nRCVD: ");
+			System.out.print("RCVD: ");
 			ppacket.printPacket();
 			// TODO Save photo data
 			
@@ -89,7 +88,7 @@ class PhotoClient {
 				if(ppacket.conNum == this.conNum) {
 					index = calcIndex(ppacket.seqNum);
 					setSign(index); // Set flag in the array from received seqNum
-					System.out.println(flags.toString());
+					//System.out.println(flags.toString());
 					System.out.println("FLAGS SIZE: " + flags.size());
 					savePacket(index, ppacket); // Save PhotoPacket to the array
 					this.ack = findAck(); // Find ACK to send
@@ -105,10 +104,11 @@ class PhotoClient {
 				// Receive new packet
 				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 				this.socket.receive(this.packet);
-				System.out.println("\n" + this.packet.getLength());
 				ppacket = new PhotoPacket(this.packet.getData());
-				System.out.print("\nRCVD: ");
+				System.out.print("RCVD: ");
 				ppacket.printPacket();
+				System.out.println("RCVD SIZE: " + this.packet.getLength());
+				// TODO Handling of smaller size packets (before final)
 			}
 			
 			// We have ppacket with fin flag on
@@ -130,20 +130,18 @@ class PhotoClient {
 		ppacket.printPacket();
 		
 		// Send packet to baryk
-		// TODO Make sure that baryk received my SYN packet
 		this.socket.send(this.packet);
 		
 		do {
 			try {
 				// Receive packet from baryk
 				this.socket.receive(this.packet);
-				System.out.println(this.packet.getLength());
 							
 				// Create PhotoPacket from datagram
 				ppacket = new PhotoPacket(this.packet.getData());
 				
 				// Print header of received packet
-				System.out.print("\nRCVD: ");
+				System.out.print("RCVD: ");
 				ppacket.printPacket();
 			}
 			catch (IOException e) {
@@ -214,28 +212,28 @@ class PhotoClient {
 		if(!this.of && (seqNum < ((int) (char) (this.ack) - 2048)) && ((char)(seqNum) < (char) (this.ack + 2048))) {
 			this.of = true;
 			this.overflow++;
-			System.out.println("\nOVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack) + " ack-w= " +  ((int) (char)(this.ack)-2048));
+			System.out.println("OVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack) + " ack-w= " +  ((int) (char)(this.ack)-2048));
 		}
 		
 		if(this.of && seqNum > 2048) { // In overflow mode but seqNum is before overflow
 			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1; // Possibly + overflow
-			System.out.println("\n OF1. Calculated index: " + index/255);
+			System.out.println("OF1. Calculated index: " + index/255);
 			return index/255;
 		}
 		
 		if(!this.of && this.overflow > 0) { // Ack overflown, no overflow mode
 			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow; // Possibly + overflow
-			System.out.println("\n OF2. Calculated index: " + index/255);
+			System.out.println("OF2. Calculated index: " + index/255);
 			return index/255;
 		}
 		
 		if(this.of && this.overflow > 0 && ((char)(seqNum) < (char) (this.ack + 2048))) { // Overflow mode, ack is old, seqNum is overflow
 			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow; // Possibly + overflow
-			System.out.println("\n OF3. Calculated index: " + index/255);
+			System.out.println("OF3. Calculated index: " + index/255);
 			return index/255;
 		}
 		
-		System.out.println("\nCalculated index: " + seqNum/255);
+		System.out.println("Calculated index: " + seqNum/255);
 		return seqNum/255; 
 	}
 	
@@ -376,7 +374,7 @@ class PhotoPacket {
 			log.append(" DATA: " + bytesToHex(this.data));
 		}
 		
-		System.out.print(log.toString());
+		System.out.println(log.toString());
 	}
 	
 	// Create string from data's hexa
