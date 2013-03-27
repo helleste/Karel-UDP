@@ -8,6 +8,7 @@ import java.net.DatagramSocket;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -49,11 +50,13 @@ class PhotoClient {
 	int overflow = 0; // How many times seqNum overflowed
 	int ack = 0; // Expected seqNum
 	boolean of = false; // Overflow flag
+	int conNum = 0; // Connection number of the current communication
 	
 	public PhotoClient(String host) {
 		try {
 			this.address = InetAddress.getByName(host);
 			this.socket = new DatagramSocket();
+			this.socket.setSoTimeout(100); // Setting timeout for receive()
 		}
 		catch(UnknownHostException e) {
 			System.out.println("Unknown host. Exiting.");
@@ -74,6 +77,7 @@ class PhotoClient {
 			// Receive second packet from baryk with real photo data
 			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 			this.socket.receive(this.packet);
+			System.out.println("\n" + this.packet.getLength());
 			ppacket = new PhotoPacket(this.packet.getData());
 			System.out.print("\nRCVD: ");
 			ppacket.printPacket();
@@ -82,23 +86,26 @@ class PhotoClient {
 			int index = 0;
 			
 			while(!ppacket.fin) {
-				index = calcIndex(ppacket.seqNum);
-				setSign(index); // Set flag in the array from received seqNum
-				System.out.println(flags.toString());
-				System.out.println("FLAGS SIZE: " + flags.size());
-				savePacket(index, ppacket); // Save PhotoPacket to the array
-				this.ack = findAck(); // Find ACK to send
-				
-				// Send confirmation packet to baryk
-				ppacket = new PhotoPacket(ppacket.conNum, 0, this.ack, 0, new byte[0]);
-				packPacket(ppacket);
-				System.out.print("\nSEND: ");
-				ppacket.printPacket();
-				this.socket.send(this.packet);
+				if(ppacket.conNum == this.conNum) {
+					index = calcIndex(ppacket.seqNum);
+					setSign(index); // Set flag in the array from received seqNum
+					System.out.println(flags.toString());
+					System.out.println("FLAGS SIZE: " + flags.size());
+					savePacket(index, ppacket); // Save PhotoPacket to the array
+					this.ack = findAck(); // Find ACK to send
+					
+					// Send confirmation packet to baryk
+					ppacket = new PhotoPacket(ppacket.conNum, 0, this.ack, 0, new byte[0]);
+					packPacket(ppacket);
+					System.out.print("\nSEND: ");
+					ppacket.printPacket();
+					this.socket.send(this.packet);
+				}
 				
 				// Receive new packet
 				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 				this.socket.receive(this.packet);
+				System.out.println("\n" + this.packet.getLength());
 				ppacket = new PhotoPacket(this.packet.getData());
 				System.out.print("\nRCVD: ");
 				ppacket.printPacket();
@@ -126,16 +133,37 @@ class PhotoClient {
 		// TODO Make sure that baryk received my SYN packet
 		this.socket.send(this.packet);
 		
-		// Receive packet from baryk
-		this.socket.receive(this.packet);
-					
-		// Create PhotoPacket from datagram
-		ppacket = new PhotoPacket(this.packet.getData());
+		do {
+			try {
+				// Receive packet from baryk
+				this.socket.receive(this.packet);
+				System.out.println(this.packet.getLength());
+							
+				// Create PhotoPacket from datagram
+				ppacket = new PhotoPacket(this.packet.getData());
+				
+				// Print header of received packet
+				System.out.print("\nRCVD: ");
+				ppacket.printPacket();
+			}
+			catch (IOException e) {
+				System.out.println("Timeout occured.");
+				try {
+					this.socket.send(this.packet);
+					ppacket = new PhotoPacket(0, 0, 0, 0, DOWNLOAD);
+				}
+				catch (IOException f) {
+					e.printStackTrace();
+				}
+				
+				continue;
+			}
+			
+		} while (!ppacket.syn);
 		
-		// Print header of received packet
-		System.out.print("\nRCVD: ");
-		ppacket.printPacket();
-		
+		// Here we received syn and the connection is established
+		this.socket.setSoTimeout(0);
+		this.conNum = ppacket.conNum;
 		return ppacket;
 	}
 	
