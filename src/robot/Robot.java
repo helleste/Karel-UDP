@@ -2,6 +2,7 @@
 
 package robot;
 
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.DatagramSocket;
@@ -104,7 +105,7 @@ class PhotoClient {
 				// Receive new packet
 				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 				this.socket.receive(this.packet);
-				ppacket = new PhotoPacket(this.packet.getData());
+				ppacket = new PhotoPacket(this.packet.getData(), this.packet.getLength());
 				System.out.print("RCVD: ");
 				ppacket.printPacket();
 				System.out.println("RCVD SIZE: " + this.packet.getLength());
@@ -115,10 +116,28 @@ class PhotoClient {
 			// TODO Send FIN packet to baryk
 			// TODO Save photo
 			System.out.println("RECEIVING DATA FINISHED!");
+			System.out.println("Saving photo…");
+			savePhoto();
+			System.out.println("PHOTO DATA SAVED.");
 		}
 		catch(IOException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	private void savePhoto() throws FileNotFoundException, IOException {
+		FileOutputStream fos = new FileOutputStream("./fotka.png");
+		
+		for (int i = 0; i < this.receivedPackets.size(); i++) {
+			try {
+				fos.write(this.receivedPackets.get(i).data);
+			}
+			catch(IOException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		fos.close();
 	}
 	
 	// Check if packet header is valid
@@ -223,23 +242,23 @@ class PhotoClient {
 		if(!this.of && seqNum < 2048 && seqNum % 255 != 0 && seqNum > 0) {
 			this.of = true;
 			this.overflow++;
-			System.out.println("OVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack) + " ack-w= " +  ((int) (char)(this.ack)-2048));
+			System.out.println("OVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack));
 		}
 		
 		if(this.of && seqNum > (char) (this.ack + 2048)) { // In overflow mode but seqNum is before overflow
-			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1; // Possibly + overflow
+			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1;
 			System.out.println("OF1. Calculated index: " + index/255);
 			return index/255;
 		}
 		
 		if(!this.of && this.overflow > 0) { // Ack overflown, no overflow mode
-			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow; // Possibly + overflow
+			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow;
 			System.out.println("OF2. Calculated index: " + index/255);
 			return index/255;
 		}
 		
 		if(this.of && this.overflow > 0 && ((char)(seqNum) < (char) (this.ack + 2048))) { // Overflow mode, ack is old, seqNum is overflow
-			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow; // Possibly + overflow
+			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow;
 			System.out.println("OF3. Calculated index: " + index/255);
 			return index/255;
 		}
@@ -282,7 +301,8 @@ class PhotoClient {
 		for(int i = 0; i < this.flags.size(); i++) {
 			c = this.flags.get(i);
 			if(c == false) break; // Found a hole in the array TODO Write a position of the hole to log
-			ack += 255;
+			if(i == this.flags.size() - 1) ack += this.receivedPackets.get(i).dLength;
+			else ack += 255;
 		}
 		
 		return ack;
@@ -301,6 +321,7 @@ class PhotoPacket {
 	public boolean fin; // FIN sign
 	public boolean rst; // RST sign
 	public byte[] data; // photo data
+	public int dLength; // actual datagram length
 	
 	// Create new PhotoPacket with all parameters
 	public PhotoPacket(int conNum, int seqNum, int ackNum, int signs, byte data[]) {
@@ -328,6 +349,24 @@ class PhotoPacket {
 		this.data = new byte[dataLength];
 		
 		for(int i = 0; i < dataLength; i++) {
+			this.data[i] = datagram[HEADER_LENGTH + i];
+		}
+	}
+	
+	// Create new PhotoPacket from received datagram and given length
+	public PhotoPacket(byte datagram[], int dataLength) {
+		
+		this.conNum = (bToI(datagram[0]) << 24) + (bToI(datagram[1]) << 16)
+				+ (bToI(datagram[2]) << 8) + bToI(datagram[3]);
+		this.seqNum = (bToI(datagram[4]) << 8) + bToI(datagram[5]);
+		this.ackNum = (bToI(datagram[6]) << 8) + bToI(datagram[7]);
+		this.signs = bToI(datagram[8]);
+		parseSigns(signs);
+		
+		this.dLength= dataLength - HEADER_LENGTH;
+		this.data = new byte[this.dLength];
+		
+		for(int i = 0; i < this.dLength; i++) {
 			this.data[i] = datagram[HEADER_LENGTH + i];
 		}
 	}
