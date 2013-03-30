@@ -40,6 +40,7 @@ class PhotoClient {
 	private static final int SYN = 4; // SYN flag
 	private static final int FIN = 2; // FIN flag
 	private static final int RST = 1	; // RST flag
+	private static final short WIDTH = 2048; // width of a sliding window
 	
 	private static final byte[] DOWNLOAD = {0x01}; // Download a photo
 	
@@ -81,7 +82,6 @@ class PhotoClient {
 			ppacket = new PhotoPacket(this.packet.getData());
 			System.out.print("RCVD: ");
 			ppacket.printPacket();
-			// TODO Save photo data
 			
 			int index = 0;
 			
@@ -89,7 +89,6 @@ class PhotoClient {
 				if(isValid(ppacket)) {
 					index = calcIndex(ppacket.seqNum);
 					setSign(index); // Set flag in the array from received seqNum
-					//System.out.println(flags.toString());
 					System.out.println("FLAGS SIZE: " + flags.size());
 					savePacket(index, ppacket); // Save PhotoPacket to the array
 					this.ack = findAck(); // Find ACK to send
@@ -109,13 +108,12 @@ class PhotoClient {
 				System.out.print("RCVD: ");
 				ppacket.printPacket();
 				System.out.println("RCVD SIZE: " + this.packet.getLength());
-				// TODO Handling of smaller size packets (before final)
 			}
 			
 			// We have ppacket with fin flag on
-			// TODO Send FIN packet to baryk
-			// TODO Save photo
 			System.out.println("RECEIVING DATA FINISHED!");
+			close();
+			this.socket.close();
 			System.out.println("Saving photo…");
 			savePhoto();
 			System.out.println("PHOTO DATA SAVED.");
@@ -126,7 +124,7 @@ class PhotoClient {
 	}
 	
 	private void savePhoto() throws FileNotFoundException, IOException {
-		FileOutputStream fos = new FileOutputStream("./fotka.png");
+		FileOutputStream fos = new FileOutputStream("./fotka.png", false);
 		
 		for (int i = 0; i < this.receivedPackets.size(); i++) {
 			try {
@@ -144,7 +142,7 @@ class PhotoClient {
 	private boolean isValid(PhotoPacket ppacket) {
 		
 		if(ppacket.conNum == this.conNum && !ppacket.rst && ppacket.ackNum == 0 && 
-				(ppacket.seqNum < this.ack || ppacket.seqNum < (this.ack + 2048))) return true;
+				(ppacket.seqNum < this.ack || ppacket.seqNum < (this.ack + WIDTH))) return true;
 		
 		return false;
 	}
@@ -193,6 +191,18 @@ class PhotoClient {
 		return ppacket;
 	}
 	
+	// End communication with baryk
+	private void close() throws IOException{
+		PhotoPacket ppacket = new PhotoPacket(this.conNum, 0, this.ack, this.FIN, new byte[0]);
+		
+		packPacket(ppacket);
+		System.out.print("SEND: ");
+		ppacket.printPacket();
+		
+		// Send packet to baryk
+		this.socket.send(this.packet);
+	}
+	
 	// Fill my DatagramPacket with my custom PhotoPacket's data
 	public void packPacket(PhotoPacket ppacket) {
 		
@@ -234,18 +244,18 @@ class PhotoClient {
 	// Calculate index from received seqNum
 	private int calcIndex(int seqNum) {
 		
-		if(this.of && (char) this.ack > (2*2048) && (char) this.ack < (3*2048)) { // ACK overflown or not yet
+		if(this.of && (char) this.ack > (2 * WIDTH) && (char) this.ack < (3 * WIDTH)) { // ACK overflown or not yet
 			System.out.println("OF MODE DISABLED");
 			this.of = false;
 		}
 			
-		if(!this.of && seqNum < 2048 && seqNum % 255 != 0 && seqNum > 0) {
+		if(!this.of && seqNum < WIDTH && seqNum % 255 != 0 && seqNum > 0) {
 			this.of = true;
 			this.overflow++;
 			System.out.println("OVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack));
 		}
 		
-		if(this.of && seqNum > (char) (this.ack + 2048)) { // In overflow mode but seqNum is before overflow
+		if(this.of && seqNum > (char) (this.ack + WIDTH)) { // In overflow mode but seqNum is before overflow
 			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1;
 			System.out.println("OF1. Calculated index: " + index/255);
 			return index/255;
@@ -257,7 +267,7 @@ class PhotoClient {
 			return index/255;
 		}
 		
-		if(this.of && this.overflow > 0 && ((char)(seqNum) < (char) (this.ack + 2048))) { // Overflow mode, ack is old, seqNum is overflow
+		if(this.of && this.overflow > 0 && ((char)(seqNum) < (char) (this.ack + WIDTH))) { // Overflow mode, ack is old, seqNum is overflow
 			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow;
 			System.out.println("OF3. Calculated index: " + index/255);
 			return index/255;
@@ -300,7 +310,7 @@ class PhotoClient {
 		
 		for(int i = 0; i < this.flags.size(); i++) {
 			c = this.flags.get(i);
-			if(c == false) break; // Found a hole in the array TODO Write a position of the hole to log
+			if(c == false) break; // Found a hole in the array 
 			if(i == this.flags.size() - 1) ack += this.receivedPackets.get(i).dLength;
 			else ack += 255;
 		}
