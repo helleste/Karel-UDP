@@ -85,7 +85,7 @@ class PhotoClient {
 			int index = 0;
 			
 			while(!ppacket.fin) {
-				if(ppacket.conNum == this.conNum) {
+				if(isValid(ppacket)) {
 					index = calcIndex(ppacket.seqNum);
 					setSign(index); // Set flag in the array from received seqNum
 					//System.out.println(flags.toString());
@@ -99,7 +99,7 @@ class PhotoClient {
 					System.out.print("\nSEND: ");
 					ppacket.printPacket();
 					this.socket.send(this.packet);
-				}
+				} // TODO Send RST?
 				
 				// Receive new packet
 				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
@@ -119,6 +119,15 @@ class PhotoClient {
 		catch(IOException e) {
 			e.printStackTrace();
 		}
+	}
+	
+	// Check if packet header is valid
+	private boolean isValid(PhotoPacket ppacket) {
+		
+		if(ppacket.conNum == this.conNum && !ppacket.rst && ppacket.ackNum == 0 && 
+				(ppacket.seqNum < this.ack || ppacket.seqNum < (this.ack + 2048))) return true;
+		
+		return false;
 	}
 	
 	// Establish communication with baryk
@@ -206,16 +215,18 @@ class PhotoClient {
 	// Calculate index from received seqNum
 	private int calcIndex(int seqNum) {
 		
-		if((char) this.ack < 2048) // ACK overflown or not yet
+		if(this.of && (char) this.ack > (2*2048) && (char) this.ack < (3*2048)) { // ACK overflown or not yet
+			System.out.println("OF MODE DISABLED");
 			this.of = false;
+		}
 			
-		if(!this.of && (seqNum < ((int) (char) (this.ack) - 2048)) && ((char)(seqNum) < (char) (this.ack + 2048))) {
+		if(!this.of && seqNum < 2048 && seqNum % 255 != 0 && seqNum > 0) {
 			this.of = true;
 			this.overflow++;
 			System.out.println("OVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack) + " ack-w= " +  ((int) (char)(this.ack)-2048));
 		}
 		
-		if(this.of && seqNum > 2048) { // In overflow mode but seqNum is before overflow
+		if(this.of && seqNum > (char) (this.ack + 2048)) { // In overflow mode but seqNum is before overflow
 			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1; // Possibly + overflow
 			System.out.println("OF1. Calculated index: " + index/255);
 			return index/255;
