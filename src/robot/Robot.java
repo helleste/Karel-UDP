@@ -9,10 +9,8 @@ import java.net.DatagramSocket;
 import java.net.DatagramPacket;
 import java.net.InetAddress;
 import java.net.SocketException;
-import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
-import java.util.Iterator;
 
 public class Robot {
 	
@@ -41,10 +39,10 @@ class PhotoClient {
 	private static final int FIN = 2; // FIN flag
 	private static final int RST = 1	; // RST flag
 	private static final short WIDTH = 2048; // width of a sliding window
-	
 	private static final byte[] DOWNLOAD = {0x01}; // Download a photo
 	
 	private ArrayList<Boolean> flags = new ArrayList<Boolean>(); // Array of flags according to received packets
+
 	
 	private ArrayList<PhotoPacket> receivedPackets = new ArrayList<PhotoPacket>(); // Raw photo data
 	
@@ -280,10 +278,10 @@ class PhotoClient {
 	
 	// Find ACK to send
 	private int findAck() {
-		int ack = 0;
+		int ack = this.ack;
 		boolean c;
 		
-		for(int i = 0; i < this.flags.size(); i++) {
+		for(int i = calcIndex(this.ack); i < this.flags.size(); i++) {
 			c = this.flags.get(i);
 			if(c == false) break; // Found a hole in the array 
 			if(i == this.flags.size() - 1) ack += this.receivedPackets.get(i).dLength;
