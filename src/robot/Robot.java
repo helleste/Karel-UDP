@@ -45,13 +45,10 @@ class PhotoClient {
 	private static final byte[] DOWNLOAD = {0x01}; // Download a photo
 	
 	private ArrayList<Boolean> flags = new ArrayList<Boolean>(); // Array of flags according to received packets
-	private int lastAck = 0; // Last send ACK
 	
 	private ArrayList<PhotoPacket> receivedPackets = new ArrayList<PhotoPacket>(); // Raw photo data
 	
-	int overflow = 0; // How many times seqNum overflowed
 	int ack = 0; // Expected seqNum
-	boolean of = false; // Overflow flag
 	int conNum = 0; // Connection number of the current communication
 	
 	public PhotoClient(String host) {
@@ -79,7 +76,7 @@ class PhotoClient {
 			// Receive second packet from baryk with real photo data
 			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
 			this.socket.receive(this.packet);
-			ppacket = new PhotoPacket(this.packet.getData());
+			ppacket = new PhotoPacket(this.packet.getData(),this.packet.getLength());
 			System.out.print("RCVD: ");
 			ppacket.printPacket();
 			
@@ -150,6 +147,7 @@ class PhotoClient {
 	// Establish communication with baryk
 	private PhotoPacket init(PhotoPacket ppacket) throws IOException {
 		
+		boolean isSyn = false;
 		ppacket = new PhotoPacket(0, 0, 0, SYN, DOWNLOAD);
 		packPacket(ppacket);
 		System.out.print("SEND: ");
@@ -158,49 +156,50 @@ class PhotoClient {
 		// Send packet to baryk
 		this.socket.send(this.packet);
 		
-		do {
-			try {
-				// Receive packet from baryk
-				this.socket.receive(this.packet);
-							
-				// Create PhotoPacket from datagram
-				ppacket = new PhotoPacket(this.packet.getData());
-				
-				// Print header of received packet
-				System.out.print("RCVD: ");
-				ppacket.printPacket();
+		while(!isSyn) {
+			DatagramPacket first = new DatagramPacket(new byte[265], 265);
+			
+			try{
+				this.socket.receive(first);
 			}
-			catch (IOException e) {
+			catch(IOException e) {
 				System.out.println("Timeout occured.");
 				try {
 					this.socket.send(this.packet);
-					ppacket = new PhotoPacket(0, 0, 0, 0, DOWNLOAD);
 				}
-				catch (IOException f) {
-					e.printStackTrace();
-				}
+				catch(IOException f) {}
 				
 				continue;
 			}
 			
-		} while (!ppacket.syn);
+			// Create PhotoPacket from datagram
+			ppacket = new PhotoPacket(first.getData());
+			ppacket.printPacket();
+			
+			if(ppacket.syn) {
+				// Here we received syn and the connection is established
+				this.socket.setSoTimeout(0);
+				this.conNum = ppacket.conNum;
+				isSyn = true;
+				return ppacket;
+			}
+		}
 		
-		// Here we received syn and the connection is established
-		this.socket.setSoTimeout(0);
-		this.conNum = ppacket.conNum;
-		return ppacket;
+		return null;
 	}
 	
 	// End communication with baryk
 	private void close() throws IOException{
-		PhotoPacket ppacket = new PhotoPacket(this.conNum, 0, this.ack, this.FIN, new byte[0]);
+		PhotoPacket ppacket = new PhotoPacket(this.conNum, 0, this.ack, FIN, new byte[0]);
 		
 		packPacket(ppacket);
 		System.out.print("SEND: ");
 		ppacket.printPacket();
 		
-		// Send packet to baryk
-		this.socket.send(this.packet);
+		for (int i = 0; i < 20; i++) {
+			// Send packet to baryk
+			this.socket.send(this.packet);
+		}
 	}
 	
 	// Fill my DatagramPacket with my custom PhotoPacket's data
@@ -244,37 +243,13 @@ class PhotoClient {
 	// Calculate index from received seqNum
 	private int calcIndex(int seqNum) {
 		
-		if(this.of && (char) this.ack > (2 * WIDTH) && (char) this.ack < (3 * WIDTH)) { // ACK overflown or not yet
-			System.out.println("OF MODE DISABLED");
-			this.of = false;
-		}
-			
-		if(!this.of && seqNum < WIDTH && seqNum % 255 != 0 && seqNum > 0) {
-			this.of = true;
-			this.overflow++;
-			System.out.println("OVERFLOW DETECTED! overflow= " + this.overflow + " ack= " + (int) (char) (this.ack));
-		}
+		int mod = seqNum % 255;
 		
-		if(this.of && seqNum > (char) (this.ack + WIDTH)) { // In overflow mode but seqNum is before overflow
-			int index = (this.overflow -1)* Character.MAX_VALUE + seqNum + this.overflow -1;
-			System.out.println("OF1. Calculated index: " + index/255);
-			return index/255;
+		if(mod == 0) return seqNum/255;
+		else {
+			int overflow = 255 - mod;
+			return (overflow * Character.MAX_VALUE + seqNum + overflow)/255;
 		}
-		
-		if(!this.of && this.overflow > 0) { // Ack overflown, no overflow mode
-			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow;
-			System.out.println("OF2. Calculated index: " + index/255);
-			return index/255;
-		}
-		
-		if(this.of && this.overflow > 0 && ((char)(seqNum) < (char) (this.ack + WIDTH))) { // Overflow mode, ack is old, seqNum is overflow
-			int index = this.overflow * Character.MAX_VALUE + seqNum + this.overflow;
-			System.out.println("OF3. Calculated index: " + index/255);
-			return index/255;
-		}
-		
-		System.out.println("Calculated index: " + seqNum/255);
-		return seqNum/255; 
 	}
 	
 	// Set flag in the array according to received index
