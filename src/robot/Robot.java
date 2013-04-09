@@ -2,6 +2,7 @@
 
 package robot;
 
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -13,43 +14,33 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 
 public class Robot {
+	private static final byte[] DOWNLOAD = {0x01}; // Download a photo
 	
-	public static void main(String[] args) {
+	public static void main(String[] args) throws IOException {
 		if(args.length == 0) {
 			System.out.println("Usage/Photo: java robot.Robot <hostname>");
 			System.out.println("Usage/Firmware: java robot.Robot <hostname> <firmware.bin>");
 		} else if(args.length == 1) {
-			PhotoClient photoClient = new PhotoClient(args[0]);
+			Connection connection = new Connection(args[0]);
+			connection.init(DOWNLOAD);
+			PhotoClient photoClient = new PhotoClient(connection);
 			photoClient.run();
 		} else if(args.length == 2) {
-//			Client client = new Client(args[0], Integer.parseInt(args[1]));
-//			client.run();
+//			FirmwareSender fwSender = new FirmwareSender(args[0], args[1]);
+//			fwSender.run();
 		}
 	}
 }
 
-class PhotoClient {
-	
-	private DatagramSocket socket;
-	private DatagramPacket packet;
-	private static final int PORT = 4000; // port number on baryk
-	private InetAddress address = null;
-	
+class Connection {
+	public DatagramSocket socket;
+	public DatagramPacket packet;
+	public int conNum;
+	public InetAddress address;
 	private static final int SYN = 4; // SYN flag
-	private static final int FIN = 2; // FIN flag
-	private static final int RST = 1	; // RST flag
-	private static final short WIDTH = 2048; // width of a sliding window
-	private static final byte[] DOWNLOAD = {0x01}; // Download a photo
+	private static final int PORT = 4000; // port number on baryk
 	
-	private ArrayList<Boolean> flags = new ArrayList<Boolean>(); // Array of flags according to received packets
-
-	
-	private ArrayList<PhotoPacket> receivedPackets = new ArrayList<PhotoPacket>(); // Raw photo data
-	
-	int ack = 0; // Expected seqNum
-	int conNum = 0; // Connection number of the current communication
-	
-	public PhotoClient(String host) {
+	public Connection(String host) {
 		try {
 			this.address = InetAddress.getByName(host);
 			this.socket = new DatagramSocket();
@@ -64,90 +55,11 @@ class PhotoClient {
 		}
 	}
 	
-	public void run() {
-		
-		PhotoPacket ppacket = null;
-		
-		try {
-			ppacket = init(ppacket);
-			
-			// Receive second packet from baryk with real photo data
-			this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
-			this.socket.receive(this.packet);
-			ppacket = new PhotoPacket(this.packet.getData(),this.packet.getLength());
-			System.out.print("RCVD: ");
-			ppacket.printPacket();
-			
-			int index = 0;
-			
-			while(!ppacket.fin) {
-				if(isValid(ppacket)) {
-					index = calcIndex(ppacket.seqNum);
-					setSign(index); // Set flag in the array from received seqNum
-					System.out.println("FLAGS SIZE: " + flags.size());
-					savePacket(index, ppacket); // Save PhotoPacket to the array
-					this.ack = findAck(); // Find ACK to send
-					
-					// Send confirmation packet to baryk
-					ppacket = new PhotoPacket(ppacket.conNum, 0, this.ack, 0, new byte[0]);
-					packPacket(ppacket);
-					System.out.print("\nSEND: ");
-					ppacket.printPacket();
-					this.socket.send(this.packet);
-				} // TODO Send RST?
-				
-				// Receive new packet
-				this.packet = new DatagramPacket(new byte[265], 265, this.address, PORT);
-				this.socket.receive(this.packet);
-				ppacket = new PhotoPacket(this.packet.getData(), this.packet.getLength());
-				System.out.print("RCVD: ");
-				ppacket.printPacket();
-				System.out.println("RCVD SIZE: " + this.packet.getLength());
-			}
-			
-			// We have ppacket with fin flag on
-			System.out.println("RECEIVING DATA FINISHED!");
-			close();
-			this.socket.close();
-			System.out.println("Saving photo…");
-			savePhoto();
-			System.out.println("PHOTO DATA SAVED.");
-		}
-		catch(IOException e) {
-			e.printStackTrace();
-		}
-	}
-	
-	private void savePhoto() throws FileNotFoundException, IOException {
-		FileOutputStream fos = new FileOutputStream("./fotka.png", false);
-		
-		for (int i = 0; i < this.receivedPackets.size(); i++) {
-			try {
-				fos.write(this.receivedPackets.get(i).data);
-			}
-			catch(IOException e) {
-				e.printStackTrace();
-			}
-		}
-		
-		fos.close();
-	}
-	
-	// Check if packet header is valid
-	private boolean isValid(PhotoPacket ppacket) {
-		
-		if(ppacket.conNum == this.conNum && !ppacket.rst && ppacket.ackNum == 0 && 
-				(ppacket.seqNum < this.ack || ppacket.seqNum < (this.ack + WIDTH))) return true;
-		
-		return false;
-	}
-	
-	// Establish communication with baryk
-	private PhotoPacket init(PhotoPacket ppacket) throws IOException {
-		
+	// Establish connection with baryk
+	public void init(byte[] command) throws IOException {
 		boolean isSyn = false;
-		ppacket = new PhotoPacket(0, 0, 0, SYN, DOWNLOAD);
-		packPacket(ppacket);
+		PhotoPacket ppacket = new PhotoPacket(0, 0, 0, SYN, command);
+		this.packet = ppacket.packPacket(this.address, PORT);
 		System.out.print("SEND: ");
 		ppacket.printPacket();
 		
@@ -179,63 +91,133 @@ class PhotoClient {
 				this.socket.setSoTimeout(0);
 				this.conNum = ppacket.conNum;
 				isSyn = true;
-				return ppacket;
+				return;
 			}
 		}
 		
-		return null;
+		return;
+	}
+}
+
+class PhotoClient {
+	
+	private DatagramPacket packet;
+	private Connection connection;
+	private static final int PORT = 4000; // port number on baryk
+	
+	private static final int SYN = 4; // SYN flag
+	private static final int FIN = 2; // FIN flag
+	private static final int RST = 1	; // RST flag
+	private static final short WIDTH = 2048; // width of a sliding window
+	
+	private ArrayList<Boolean> flags = new ArrayList<Boolean>(); // Array of flags according to received packets
+	private ArrayList<PhotoPacket> receivedPackets = new ArrayList<PhotoPacket>(); // Raw photo data
+	
+	int ack = 0; // Expected seqNum
+	
+	public PhotoClient(Connection connection) {
+		this.connection = connection;
+	}
+	
+	public void run() {
+		
+		PhotoPacket ppacket = null;
+		
+		try {
+			
+			// Receive second packet from baryk with real photo data
+			this.packet = new DatagramPacket(new byte[265], 265, connection.address, PORT);
+			connection.socket.receive(this.packet);
+			ppacket = new PhotoPacket(this.packet.getData(),this.packet.getLength());
+			System.out.print("RCVD: ");
+			ppacket.printPacket();
+			
+			int index = 0;
+			
+			while(!ppacket.fin) {
+				if(isValid(ppacket)) {
+					index = calcIndex(ppacket.seqNum);
+					setSign(index); // Set flag in the array from received seqNum
+					System.out.println("FLAGS SIZE: " + flags.size());
+					savePacket(index, ppacket); // Save PhotoPacket to the array
+					this.ack = findAck(); // Find ACK to send
+					
+					// Send confirmation packet to baryk
+					ppacket = new PhotoPacket(connection.conNum, 0, this.ack, 0, new byte[0]);
+					this.packet = ppacket.packPacket(connection.address, PORT);
+					System.out.print("\nSEND: ");
+					ppacket.printPacket();
+					connection.socket.send(this.packet);
+				} 
+//				else {
+//					// TODO Send RST?
+//					ppacket = new PhotoPacket(this.conNum, 0, this.ack, RST, new byte[0]);
+//					
+//					packPacket(ppacket);
+//					System.out.println("SENDING RST!!!");
+//					System.out.print("SEND: ");
+//					ppacket.printPacket();
+//					//this.socket.close();
+//					//System.exit(0);
+//				}
+				
+				// Receive new packet
+				this.packet = new DatagramPacket(new byte[265], 265, connection.address, PORT);
+				connection.socket.receive(this.packet);
+				ppacket = new PhotoPacket(this.packet.getData(), this.packet.getLength());
+				System.out.print("RCVD: ");
+				ppacket.printPacket();
+				System.out.println("RCVD SIZE: " + this.packet.getLength());
+			}
+			
+			// We have ppacket with fin flag on
+			System.out.println("RECEIVING DATA FINISHED!");
+			close();
+			connection.socket.close();
+			System.out.println("Saving photo…");
+			savePhoto();
+			System.out.println("PHOTO DATA SAVED.");
+		}
+		catch(IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	private void savePhoto() throws FileNotFoundException, IOException {
+		FileOutputStream fos = new FileOutputStream("./fotka.png", false);
+		
+		for (int i = 0; i < this.receivedPackets.size(); i++) {
+			try {
+				fos.write(this.receivedPackets.get(i).data);
+			}
+			catch(IOException e) {
+				e.printStackTrace();
+			}
+		}
+		
+		fos.close();
+	}
+	
+	// Check if packet header is valid
+	private boolean isValid(PhotoPacket ppacket) {
+		
+		if(ppacket.conNum == connection.conNum) return true;
+		
+		return false;
 	}
 	
 	// End communication with baryk
 	private void close() throws IOException{
-		PhotoPacket ppacket = new PhotoPacket(this.conNum, 0, this.ack, FIN, new byte[0]);
+		PhotoPacket ppacket = new PhotoPacket(connection.conNum, 0, this.ack, FIN, new byte[0]);
 		
-		packPacket(ppacket);
+		this.packet = ppacket.packPacket(connection.address, PORT);
 		System.out.print("SEND: ");
 		ppacket.printPacket();
 		
 		for (int i = 0; i < 20; i++) {
 			// Send packet to baryk
-			this.socket.send(this.packet);
+			connection.socket.send(this.packet);
 		}
-	}
-	
-	// Fill my DatagramPacket with my custom PhotoPacket's data
-	public void packPacket(PhotoPacket ppacket) {
-		
-		byte myPacket[] = new byte[10];
-		
-		// Add connection number first
-		myPacket[0] = (byte) ((ppacket.conNum >> 24) % 256);
-		myPacket[1] = (byte) ((ppacket.conNum >> 16) % 256);
-		myPacket[2] = (byte) ((ppacket.conNum >> 8) % 256);
-		myPacket[3] = (byte) ((ppacket.conNum) % 256);
-		
-		// Then add the sequence number
-		myPacket[4] = (byte) ((ppacket.seqNum >> 8) % 256);
-		myPacket[5] = (byte) ((ppacket.seqNum) % 256);
-		
-		myPacket[7] = (byte) ((ppacket.ackNum) % 256);
-		// Then add the acknowledgment number
-		myPacket[6] = (byte) ((ppacket.ackNum >> 8) % 256);
-		
-		// The header ends with set of flags
-		myPacket[8] = (byte) (ppacket.signs);
-		
-		// At the end we fill the packet with data
-		if(ppacket.data != null) {
-			for (int i = 0; i < ppacket.data.length; i++) {
-				myPacket[9 + i] = ppacket.data[i];
-			}
-		}
-		
-		// Decide the sending length of the packet
-		int lengthPacket = 9;
-		if(ppacket.syn) lengthPacket = 10;
-		
-		// Create the final DatagramPacket
-		this.packet = new DatagramPacket(myPacket, lengthPacket, this.address, PORT);
-		
 	}
 	
 	// Calculate index from received seqNum
@@ -336,6 +318,44 @@ class PhotoPacket {
 		}
 	}
 	
+	// Fill my DatagramPacket with my custom PhotoPacket's data
+		public DatagramPacket packPacket(InetAddress address, int port) {
+			
+			byte myPacket[] = new byte[10];
+			
+			// Add connection number first
+			myPacket[0] = (byte) ((this.conNum >> 24) % 256);
+			myPacket[1] = (byte) ((this.conNum >> 16) % 256);
+			myPacket[2] = (byte) ((this.conNum >> 8) % 256);
+			myPacket[3] = (byte) ((this.conNum) % 256);
+			
+			// Then add the sequence number
+			myPacket[4] = (byte) ((this.seqNum >> 8) % 256);
+			myPacket[5] = (byte) ((this.seqNum) % 256);
+			
+			myPacket[7] = (byte) ((this.ackNum) % 256);
+			// Then add the acknowledgment number
+			myPacket[6] = (byte) ((this.ackNum >> 8) % 256);
+			
+			// The header ends with set of flags
+			myPacket[8] = (byte) (this.signs);
+			
+			// At the end we fill the packet with data
+			if(this.data != null) {
+				for (int i = 0; i < this.data.length; i++) {
+					myPacket[9 + i] = this.data[i];
+				}
+			}
+			
+			// Decide the sending length of the packet
+			int lengthPacket = 9;
+			if(this.syn) lengthPacket = 10;
+			
+			// Create the final DatagramPacket
+			return new DatagramPacket(myPacket, lengthPacket, address, port);
+			
+		}
+	
 	// Create new PhotoPacket from received datagram and given length
 	public PhotoPacket(byte datagram[], int dataLength) {
 		
@@ -427,3 +447,88 @@ class PhotoPacket {
 		return new String(hexChars);
 	}
 }
+
+/* UPLOAD */
+//class FirmwareSender{
+//	
+//	private DatagramSocket socket;
+//	private DatagramPacket packet;
+//	private FileInputStream fw;
+//	private static final int PORT = 4000; // port number on baryk
+//	private InetAddress address = null;
+//	
+//	private static final int SYN = 4; // SYN flag
+//	private static final int FIN = 2; // FIN flag
+//	private static final int RST = 1	; // RST flag
+//	private static final short WIDTH = 2048; // width of a sliding window
+//	private static final byte[] UPLOAD = {0x02}; // Download a photo
+//	
+//	public FirmwareSender(String host, String fwPath) {
+//		try {
+//			this.address = InetAddress.getByName(host);
+//			this.socket = new DatagramSocket();
+//			this.socket.setSoTimeout(100); // Setting timeout for receive()
+//			this.fw = new FileInputStream(fwPath);
+//		}
+//		catch(UnknownHostException e) {
+//			System.out.println("Unknown host. Exiting.");
+//			System.exit(-1);
+//		}
+//		catch(SocketException s) {
+//			s.printStackTrace();
+//		}
+//		catch(FileNotFoundException f) {
+//			System.out.println("File not found. Exiting.");
+//			System.exit(-1);
+//		}
+//	}
+//	
+//	public void run() {
+//		PhotoPacket ppacket = null;
+//	}
+//	
+//	// Establish communication with baryk
+//	private PhotoPacket init(PhotoPacket ppacket) throws IOException {
+//		
+//		boolean isSyn = false;
+//		ppacket = new PhotoPacket(0, 0, 0, SYN, UPLOAD);
+//		this.packet = packPacket(ppacket);
+//		System.out.print("SEND: ");
+//		ppacket.printPacket();
+//		
+//		// Send packet to baryk
+//		this.socket.send(this.packet);
+//		
+//		while(!isSyn) {
+//			DatagramPacket first = new DatagramPacket(new byte[265], 265);
+//			
+//			try{
+//				this.socket.receive(first);
+//			}
+//			catch(IOException e) {
+//				System.out.println("Timeout occured.");
+//				try {
+//					this.socket.send(this.packet);
+//				}
+//				catch(IOException f) {}
+//				
+//				continue;
+//			}
+//			
+//			// Create PhotoPacket from datagram
+//			ppacket = new PhotoPacket(first.getData());
+//			ppacket.printPacket();
+//			
+//			if(ppacket.syn) {
+//				// Here we received syn and the connection is established
+//				this.socket.setSoTimeout(0);
+//				this.conNum = ppacket.conNum;
+//				isSyn = true;
+//				return ppacket;
+//			}
+//		}
+//		
+//		return null;
+//	}
+//	
+//}
