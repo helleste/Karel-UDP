@@ -554,7 +554,7 @@ class FirmwareSender{
 		System.out.println("RCVD SIZE: " + this.packet.getLength());
 		
 		
-		while(!this.end) {
+		while(this.curAck != this.fileBytes.length) {
 			if(ppacket.conNum == connection.conNum && this.curAck >= this.windowStart) {
 				if(this.curAck == this.prevAck) this.ackCount++;
 				else this.ackCount = 0;
@@ -573,7 +573,7 @@ class FirmwareSender{
 					break;
 	
 				default:
-					sendPacket(ppacket);
+					sendPacket(ppacket, this.windowStart);
 					break;
 				}
 			}
@@ -584,74 +584,92 @@ class FirmwareSender{
 			ppacket = new PhotoPacket(this.packet.getData());
 			System.out.print("RCVD: ");
 			ppacket.printPacket();
-			this.curAck = calcAck(ppacket.ackNum);
+			if((char) this.fileBytes.length == ppacket.ackNum) this.curAck = this.fileBytes.length;
+			else this.curAck = calcAck(ppacket.ackNum);
 			System.out.println("curAck: " + this.curAck);
 			System.out.println("RCVD SIZE: " + this.packet.getLength());
+			System.out.println("wStart: "  + this.windowStart + "wEnd: " + this.windowEnd);
 		}
 		
 		System.out.println("SENDING FINISHED!");
+		close();
 	}
 	
 	// Send full Window of data to baryk
 	private void sendFullWindow(PhotoPacket ppacket) throws IOException {
+		boolean end = false;
 		int lastSize = 0;
 		for (int i = this.windowStart; i <= this.windowEnd; i+=255) {
-			// Send file packet to baryk
-			if(this.fileBytes.length - i >= 255)
-				System.arraycopy(this.fileBytes, i, this.packetBytes, 0, 255);
-			else {
-				lastSize = this.fileBytes.length - i;
-				System.out.println("i: " + i);
-				System.out.println("PREFINAL PACKET SIZE: " + lastSize);
-				System.arraycopy(this.fileBytes, i, this.packetBytes, 0, lastSize);
-				this.end = true;
+			if(i < this.fileBytes.length) {
+				// Send file packet to baryk
+				if(this.fileBytes.length - i >= 255)
+					System.arraycopy(this.fileBytes, i, this.packetBytes, 0, 255);
+				else {
+					lastSize = this.fileBytes.length - i;
+					System.out.println("i: " + i);
+					System.out.println("PREFINAL PACKET SIZE: " + lastSize);
+					System.arraycopy(this.fileBytes, i, this.packetBytes, 0, lastSize);
+					end = true;
+				}
+				ppacket = new PhotoPacket(connection.conNum, i, 0, 0, packetBytes);
+				if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
+				else this.packet = ppacket.packagePacket(connection.address, connection.PORT, lastSize);
+				System.out.println("pckt length " + this.packet.getLength());
+				System.out.print("\nSEND: ");
+				ppacket.printPacket();
+				connection.socket.send(this.packet);
 			}
-			ppacket = new PhotoPacket(connection.conNum, i, 0, 0, packetBytes);
-			if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
-			else this.packet = ppacket.packagePacket(connection.address, connection.PORT, lastSize);
-			System.out.println("pckt length " + this.packet.getLength());
-			System.out.print("\nSEND: ");
-			ppacket.printPacket();
-			connection.socket.send(this.packet);
-			if(this.end) break;
 		}
 	}
 	
 	// Move window according to received ack
 	private void moveWindow(PhotoPacket ppacket) throws IOException {
-		int pW = (this.windowEnd - this.curAck) / 255;
 		int lastSize = 0;
 		this.windowStart = this.curAck;
+		boolean end = false;
 		
 		for (int i = this.windowEnd + 255; i <= this.windowStart + 1785; i+=255) {
-			// Send file packet to baryk
-			if(this.fileBytes.length - i >= 255)
-				System.arraycopy(this.fileBytes, i, this.packetBytes, 0, 255);
-			else { // TODO this.curAck must be same as this.fileBytes.length
-				lastSize = this.fileBytes.length - i;
-				System.out.println("i: " + i);
-				System.out.println("PREFINAL PACKET SIZE: " + lastSize);
-				System.arraycopy(this.fileBytes, i, this.packetBytes, 0, lastSize);
-				this.end = true;
+			if(i < this.fileBytes.length) {
+				// Send file packet to baryk
+				if(this.fileBytes.length - i >= 255)
+					System.arraycopy(this.fileBytes, i, this.packetBytes, 0, 255);
+				else { // TODO this.curAck must be same as this.fileBytes.length
+					lastSize = this.fileBytes.length - i;
+					System.out.println("mw i: " + i);
+					System.out.println("PREFINAL PACKET SIZE: " + lastSize);
+					System.arraycopy(this.fileBytes, i, this.packetBytes, 0, lastSize);
+					end = true;
+				}
+				ppacket = new PhotoPacket(connection.conNum, i, 0, 0, packetBytes);
+				if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
+				else this.packet = ppacket.packagePacket(connection.address, connection.PORT, lastSize);
+				System.out.println("pckt length " + this.packet.getLength());
+				System.out.print("\nSEND: ");
+				ppacket.printPacket();
+				connection.socket.send(this.packet);
+				if(end) break;
 			}
-			ppacket = new PhotoPacket(connection.conNum, i, 0, 0, packetBytes);
-			if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
-			else this.packet = ppacket.packagePacket(connection.address, connection.PORT, lastSize);
-			System.out.println("pckt length " + this.packet.getLength());
-			System.out.print("\nSEND: ");
-			ppacket.printPacket();
-			connection.socket.send(this.packet);
-			if(this.end) break;
 		}
-		this.windowEnd = this.windowStart + 1785;
+		if(this.end) this.windowEnd = this.fileBytes.length;
+		else this.windowEnd = this.windowStart + 1785;
 	}
 	
 	// Send one packet to baryk
-	private void sendPacket(PhotoPacket ppacket) throws IOException {
+	private void sendPacket(PhotoPacket ppacket, int offset) throws IOException {
+		int lastSize = 0;
+		boolean end = false;
 		// Send file packet to baryk
-		System.arraycopy(this.fileBytes, this.windowStart, this.packetBytes, 0, 255);
-		ppacket = new PhotoPacket(connection.conNum, this.windowStart, 0, 0, packetBytes);
-		this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
+		if(this.fileBytes.length - offset >= 255)
+			System.arraycopy(this.fileBytes, offset, this.packetBytes, 0, 255);
+		else { // TODO this.curAck must be same as this.fileBytes.length
+			lastSize = this.fileBytes.length - offset;
+			System.out.println("PREFINAL PACKET SIZE: " + lastSize);
+			System.arraycopy(this.fileBytes, offset, this.packetBytes, 0, lastSize);
+			end = true;
+		}
+		ppacket = new PhotoPacket(connection.conNum, offset, 0, 0, packetBytes);
+		if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
+		else this.packet = ppacket.packagePacket(connection.address, connection.PORT, lastSize);
 		System.out.print("\nSEND: ");
 		ppacket.printPacket();
 		connection.socket.send(this.packet);
@@ -685,22 +703,15 @@ class FirmwareSender{
 	
 	// End communication with baryk
 	private void close() throws IOException{
-		// TODO proper finish
-		PhotoPacket ppacket = new PhotoPacket(connection.conNum, this.fileBytes.length, 0, FIN, new byte[0]);
-
-		this.packet = ppacket.packPacket(connection.address, connection.PORT, FIN_LENGTH);
-		System.out.print("SEND: ");
-		ppacket.printPacket();
-		
-		connection.socket.send(this.packet);
-		connection.socket.receive(packet);
-		ppacket = new PhotoPacket(this.packet.getData());
-		System.out.print("RCVD: ");
-		ppacket.printPacket();
+		PhotoPacket ppacket = new PhotoPacket(connection.conNum, this.fileBytes.length, 0, 0, new byte[0]);
 		
 		while(!ppacket.fin) {
+			// TODO proper finish
 			ppacket = new PhotoPacket(connection.conNum, this.fileBytes.length, 0, FIN, new byte[0]);
+
 			this.packet = ppacket.packPacket(connection.address, connection.PORT, FIN_LENGTH);
+			System.out.print("SEND: ");
+			ppacket.printPacket();
 			connection.socket.send(this.packet);
 			
 			try {
@@ -711,10 +722,8 @@ class FirmwareSender{
 			}
 			catch(SocketTimeoutException e) {
 				System.out.println("Timeout occurred.");
-				continue;
+				//continue;
 			}
 		}
-		
-		return;
 	}
 }
