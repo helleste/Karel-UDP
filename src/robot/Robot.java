@@ -147,14 +147,13 @@ class PhotoClient {
 				if(isValid(ppacket)) {
 					index = calcIndex(ppacket.seqNum);
 					setSign(index); // Set flag in the array from received seqNum
-					System.out.println("FLAGS SIZE: " + flags.size());
 					savePacket(index, ppacket); // Save PhotoPacket to the array
 					this.ack = findAck(); // Find ACK to send
 
 					// Send confirmation packet to baryk
 					ppacket = new PhotoPacket(connection.conNum, 0, this.ack, 0, new byte[0]);
 					this.packet = ppacket.packPacket(connection.address, connection.PORT, ACK_LENGTH);
-					System.out.print("\nSEND: ");
+					System.out.print("SEND: ");
 					ppacket.printPacket();
 					connection.socket.send(this.packet);
 				} 
@@ -176,7 +175,6 @@ class PhotoClient {
 				ppacket = new PhotoPacket(this.packet.getData(), this.packet.getLength());
 				System.out.print("RCVD: ");
 				ppacket.printPacket();
-				System.out.println("RCVD SIZE: " + this.packet.getLength());
 			}
 
 			// We have ppacket with fin flag on
@@ -432,7 +430,7 @@ class PhotoPacket {
 		log.append(" RST: " + this.rst);
 		if(this.data != null) {
 			log.append(" dataLength: " + this.data.length);
-			log.append(" DATA: " + bytesToHex(this.data));
+//			log.append(" DATA: " + bytesToHex(this.data));
 		}
 
 		System.out.println(log.toString());
@@ -513,7 +511,6 @@ class FirmwareSender{
 		ppacket = new PhotoPacket(this.packet.getData());
 		System.out.print("RCVD: ");
 		ppacket.printPacket();
-		System.out.println("RCVD SIZE: " + this.packet.getLength());
 		
 		
 		while(this.curAck != this.fileBytes.length) {
@@ -548,9 +545,6 @@ class FirmwareSender{
 			ppacket.printPacket();
 			if((char) this.fileBytes.length == ppacket.ackNum) this.curAck = this.fileBytes.length;
 			else this.curAck = calcAck(ppacket.ackNum);
-			System.out.println("curAck: " + this.curAck);
-			System.out.println("RCVD SIZE: " + this.packet.getLength());
-			System.out.println("wStart: "  + this.windowStart + "wEnd: " + this.windowEnd);
 		}
 		
 		System.out.println("SENDING FINISHED!");
@@ -570,7 +564,6 @@ class FirmwareSender{
 				}
 				else {
 					lastSize = this.fileBytes.length - i;
-					System.out.println("i: " + i);
 					System.out.println("PREFINAL PACKET SIZE: " + lastSize);
 					this.packetBytes = new byte[lastSize];
 					System.arraycopy(this.fileBytes, i, this.packetBytes, 0, lastSize);
@@ -579,8 +572,7 @@ class FirmwareSender{
 				ppacket = new PhotoPacket(connection.conNum, i, 0, 0, packetBytes);
 				if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
 				else this.packet = ppacket.packPacket(connection.address, connection.PORT, lastSize + 9);
-				System.out.println("pckt length " + this.packet.getLength());
-				System.out.print("\nSEND: ");
+				System.out.print("SEND: ");
 				ppacket.printPacket();
 				connection.socket.send(this.packet);
 			}
@@ -602,7 +594,6 @@ class FirmwareSender{
 				}
 				else { 
 					lastSize = this.fileBytes.length - i;
-					System.out.println("mw i: " + i);
 					System.out.println("PREFINAL PACKET SIZE: " + lastSize);
 					this.packetBytes = new byte[lastSize];
 					System.arraycopy(this.fileBytes, i, this.packetBytes, 0, lastSize);
@@ -611,8 +602,7 @@ class FirmwareSender{
 				ppacket = new PhotoPacket(connection.conNum, i, 0, 0, packetBytes);
 				if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
 				else this.packet = ppacket.packPacket(connection.address, connection.PORT, lastSize + 9);
-				System.out.println("pckt length " + this.packet.getLength());
-				System.out.print("\nSEND: ");
+				System.out.print("SEND: ");
 				ppacket.printPacket();
 				connection.socket.send(this.packet);
 				if(end) break;
@@ -641,7 +631,7 @@ class FirmwareSender{
 		ppacket = new PhotoPacket(connection.conNum, offset, 0, 0, packetBytes);
 		if(!end) this.packet = ppacket.packPacket(connection.address, connection.PORT, DATA_LENGTH);
 		else this.packet = ppacket.packPacket(connection.address, connection.PORT, lastSize + 9);
-		System.out.print("\nSEND: ");
+		System.out.print("SEND: ");
 		ppacket.printPacket();
 		connection.socket.send(this.packet);
 	}
@@ -661,13 +651,14 @@ class FirmwareSender{
 	// Safe way to send a packet
 	private DatagramPacket safeReceive(PhotoPacket ppacket) throws IOException {
 		DatagramPacket packet = new DatagramPacket(new byte[9], 9, connection.address, connection.PORT);
+		
 		try {
 			connection.socket.receive(packet);
 		}
 		catch(SocketTimeoutException e) {
 			System.out.println("Timeout occurred.");
 			sendFullWindow(ppacket);
-			safeReceive(ppacket);
+			return safeReceive(ppacket);
 		}
 		
 		return packet;
